@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Serif+Display&display=swap');
+
+@layer base {
+  :root {
+    --background: 48 33% 96%;
+    --foreground: 229 42% 23%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 229 42% 23%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 229 42% 23%;
+
+    --primary: 12 47% 47%;
+    --primary-foreground: 48 33% 96%;
+
+    --secondary: 229 42% 23%;
+    --secondary-foreground: 48 33% 96%;
+
+    --muted: 214 6% 90%;
+    --muted-foreground: 214 6% 45%;
+
+    --accent: 229 30% 92%;
+    --accent-foreground: 229 42% 23%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 15% 85%;
+    --input: 214 15% 85%;
+    --ring: 12 47% 47%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 229 42% 23%;
+    --sidebar-foreground: 48 33% 96%;
+    --sidebar-primary: 12 47% 47%;
+    --sidebar-primary-foreground: 48 33% 96%;
+    --sidebar-accent: 229 35% 30%;
+    --sidebar-accent-foreground: 48 33% 96%;
+    --sidebar-border: 229 30% 32%;
+    --sidebar-ring: 12 47% 47%;
+
+    --success: 152 56% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 229 42% 23%;
+  }
+
+  .dark {
+    --background: 229 42% 12%;
+    --foreground: 48 33% 96%;
+
+    --card: 229 42% 16%;
+    --card-foreground: 48 33% 96%;
+
+    --popover: 229 42% 16%;
+    --popover-foreground: 48 33% 96%;
+
+    --primary: 12 47% 52%;
+    --primary-foreground: 48 33% 96%;
+
+    --secondary: 229 30% 30%;
+    --secondary-foreground: 48 33% 96%;
+
+    --muted: 229 20% 22%;
+    --muted-foreground: 214 6% 60%;
+
+    --accent: 229 30% 25%;
+    --accent-foreground: 48 33% 96%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 48 33% 96%;
+
+    --border: 229 20% 25%;
+    --input: 229 20% 25%;
+    --ring: 12 47% 52%;
+
+    --sidebar-background: 229 42% 10%;
+    --sidebar-foreground: 48 33% 96%;
+    --sidebar-primary: 12 47% 52%;
+    --sidebar-primary-foreground: 48 33% 96%;
+    --sidebar-accent: 229 35% 18%;
+    --sidebar-accent-foreground: 48 33% 96%;
+    --sidebar-border: 229 30% 18%;
+    --sidebar-ring: 12 47% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'DM Serif Display', serif;
+  }
+}

@@ -1,0 +1,186 @@
+planna/
+├── README.md
+├── package.json
+├── package-lock.json
+├── .env.local                    # Environment variables (not committed)
+├── .env.example                  # Example environment variables
+├── .gitignore
+├── tsconfig.json                 # TypeScript configuration
+├── tailwind.config.ts            # Tailwind CSS configuration
+├── postcss.config.js             # PostCSS configuration
+├── next.config.js                # Next.js configuration (if using Next.js)
+├── vercel.json                   # Vercel deployment configuration
+│
+├── public/                       # Static assets
+│   ├── favicon.ico
+│   └── images/
+│
+├── src/
+│   ├── app/                      # Next.js App Router (if using Next.js)
+│   │   ├── layout.tsx            # Root layout
+│   │   ├── page.tsx              # Home page
+│   │   ├── (auth)/               # Auth routes group
+│   │   │   ├── login/
+│   │   │   │   └── page.tsx
+│   │   │   └── signup/
+│   │   │       └── page.tsx
+│   │   ├── (dashboard)/          # Protected dashboard routes
+│   │   │   ├── layout.tsx        # Dashboard layout with sidebar
+│   │   │   ├── plans/
+│   │   │   │   ├── page.tsx      # List of user's plans
+│   │   │   │   ├── new/
+│   │   │   │   │   └── page.tsx  # Create new plan
+│   │   │   │   └── [id]/
+│   │   │   │       ├── page.tsx  # View/edit plan
+│   │   │   │       └── export/
+│   │   │   │           └── page.tsx # Export plan as CSV
+│   │   │   ├── presets/
+│   │   │   │   ├── page.tsx      # Browse preset plans
+│   │   │   │   └── [id]/
+│   │   │   │       └── page.tsx  # View preset plan
+│   │   │   └── admin/            # Admin routes (protected)
+│   │   │       ├── layout.tsx    # Admin layout
+│   │   │       ├── page.tsx      # Admin dashboard
+│   │   │       ├── courses/
+│   │   │       │   ├── page.tsx  # Manage courses
+│   │   │       │   └── upload/
+│   │   │       │       └── page.tsx # Upload JSON file
+│   │   │       └── presets/
+│   │   │           ├── page.tsx  # Manage preset plans
+│   │   │           └── [id]/
+│   │   │               └── page.tsx # Edit preset plan
+│   │   └── api/                  # API routes
+│   │       ├── auth/
+│   │       │   ├── login/
+│   │       │   │   └── route.ts
+│   │       │   ├── signup/
+│   │       │   │   └── route.ts
+│   │       │   └── logout/
+│   │       │       └── route.ts
+│   │       ├── courses/
+│   │       │   ├── route.ts      # GET all courses, POST new course
+│   │       │   ├── [id]/
+│   │       │   │   └── route.ts  # GET, PUT, DELETE course
+│   │       │   └── search/
+│   │       │       └── route.ts  # Search courses
+│   │       ├── plans/
+│   │       │   ├── route.ts      # GET user plans, POST new plan
+│   │       │   ├── [id]/
+│   │       │   │   ├── route.ts  # GET, PUT, DELETE plan
+│   │       │   │   └── courses/
+│   │       │   │       └── route.ts # Manage courses in plan
+│   │       │   └── [id]/export/
+│   │       │       └── route.ts  # Export plan as CSV
+│   │       ├── presets/
+│   │       │   ├── route.ts      # GET all presets
+│   │       │   └── [id]/
+│   │       │       └── route.ts  # GET preset details
+│   │       └── admin/
+│   │           ├── courses/
+│   │           │   └── upload/
+│   │           │       └── route.ts # Upload JSON file
+│   │           └── presets/
+│   │               └── route.ts  # Manage preset plans
+│   │
+│   ├── components/               # React components
+│   │   ├── ui/                   # shadcn/ui components
+│   │   │   ├── button.tsx
+│   │   │   ├── input.tsx
+│   │   │   ├── card.tsx
+│   │   │   ├── dialog.tsx
+│   │   │   ├── select.tsx
+│   │   │   ├── table.tsx
+│   │   │   ├── form.tsx
+│   │   │   ├── badge.tsx
+│   │   │   ├── dropdown-menu.tsx
+│   │   │   ├── toast.tsx
+│   │   │   └── ...               # Other shadcn components
+│   │   │
+│   │   ├── layout/               # Layout components
+│   │   │   ├── Header.tsx
+│   │   │   ├── Sidebar.tsx
+│   │   │   ├── Footer.tsx
+│   │   │   └── DashboardLayout.tsx
+│   │   │
+│   │   ├── auth/                 # Authentication components
+│   │   │   ├── LoginForm.tsx
+│   │   │   ├── SignupForm.tsx
+│   │   │   └── AuthGuard.tsx
+│   │   │
+│   │   ├── courses/              # Course-related components
+│   │   │   ├── CourseCard.tsx
+│   │   │   ├── CourseList.tsx
+│   │   │   ├── CourseSearch.tsx
+│   │   │   ├── CourseFilter.tsx
+│   │   │   ├── CourseDetails.tsx
+│   │   │   └── CourseSelector.tsx
+│   │   │
+│   │   ├── plans/                # Plan-related components
+│   │   │   ├── PlanCard.tsx
+│   │   │   ├── PlanList.tsx
+│   │   │   ├── PlanEditor.tsx
+│   │   │   ├── PlanTimeline.tsx  # Visual timeline of courses
+│   │   │   ├── PlanSummary.tsx
+│   │   │   ├── SemesterView.tsx
+│   │   │   └── CourseDragDrop.tsx # Drag and drop for reordering
+│   │   │
+│   │   ├── presets/              # Preset plan components
+│   │   │   ├── PresetCard.tsx
+│   │   │   ├── PresetList.tsx
+│   │   │   └── PresetPreview.tsx
+│   │   │
+│   │   └── admin/                # Admin components
+│   │       ├── CourseUpload.tsx
+│   │       ├── CourseTable.tsx
+│   │       ├── PresetEditor.tsx
+│   │       └── AdminGuard.tsx
+│   │
+│   ├── lib/                      # Utility libraries
+│   │   ├── db/                   # Database utilities
+│   │   │   ├── index.ts          # Database connection (Neon)
+│   │   │   ├── queries/           # Database queries
+│   │   │   │   ├── courses.ts
+│   │   │   │   ├── users.ts
+│   │   │   │   ├── plans.ts
+│   │   │   │   ├── presets.ts
+│   │   │   │   └── schools.ts
+│   │   │   └── migrations/       # SQL migration files
+│   │   │       └── 001_initial_schema.sql
+│   │   │
+│   │   ├── auth/                 # Authentication utilities
+│   │   │   ├── session.ts
+│   │   │   └── password.ts
+│   │   │
+│   │   ├── utils/                # General utilities
+│   │   │   ├── cn.ts             # className utility
+│   │   │   ├── format.ts         # Formatting utilities
+│   │   │   └── validation.ts     # Validation schemas
+│   │   │
+│   │   └── api/                  # API client utilities
+│   │       ├── client.ts         # API client setup
+│   │       └── types.ts          # API types
+│   │
+│   ├── types/                    # TypeScript type definitions
+│   │   ├── database.ts           # Database types (generated or manual)
+│   │   ├── course.ts
+│   │   ├── plan.ts
+│   │   ├── user.ts
+│   │   └── api.ts
+│   │
+│   ├── hooks/                    # Custom React hooks
+│   │   ├── useAuth.ts
+│   │   ├── useCourses.ts
+│   │   ├── usePlans.ts
+│   │   └── useDebounce.ts
+│   │
+│   └── styles/                   # Global styles
+│       └── globals.css           # Global CSS with Tailwind
+│
+├── scripts/                      # Utility scripts
+│   ├── seed-database.ts          # Seed database with initial data
+│   └── import-courses.ts         # Import courses from JSON
+│
+└── docs/                         # Documentation
+    ├── API.md                    # API documentation
+    ├── DATABASE.md               # Database schema documentation
+    └── DEPLOYMENT.md             # Deployment guide
