@@ -1,61 +1,65 @@
-import { sql } from '../index';
+import { supabase, isSupabaseAvailable } from '../../supabaseClient';
 import type { User } from '@/types';
 
 export async function getUserByEmail(email: string): Promise<User | null> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    SELECT id, email, name, password_hash, is_admin
-    FROM users
-    WHERE email = ${email}
-  `;
+  // Normalize email to lowercase for case-insensitive matching
+  const emailLower = email.toLowerCase().trim();
   
-  if (result.length === 0) return null;
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, name, password_hash, is_admin')
+    .ilike('email', emailLower)
+    .single();
   
-  const row = result[0];
+  if (error || !data) return null;
+  
   return {
-    id: row.id,
-    email: row.email,
-    name: row.name,
-    is_admin: row.is_admin ?? false,
+    id: data.id,
+    email: data.email,
+    name: data.name,
+    is_admin: data.is_admin ?? false,
   };
 }
 
 export async function getUserById(id: string): Promise<User | null> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    SELECT id, email, name, is_admin
-    FROM users
-    WHERE id = ${id}
-  `;
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, name, is_admin')
+    .eq('id', id)
+    .single();
   
-  if (result.length === 0) return null;
+  if (error || !data) return null;
   
-  const row = result[0];
   return {
-    id: row.id,
-    email: row.email,
-    name: row.name,
-    is_admin: row.is_admin ?? false,
+    id: data.id,
+    email: data.email,
+    name: data.name,
+    is_admin: data.is_admin ?? false,
   };
 }
 
 export async function createUser(email: string, name: string, passwordHash: string): Promise<User> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    INSERT INTO users (email, name, password_hash)
-    VALUES (${email}, ${name}, ${passwordHash})
-    RETURNING id, email, name, is_admin
-  `;
+  const { data, error } = await supabase
+    .from('users')
+    .insert({ email, name, password_hash: passwordHash })
+    .select('id, email, name, is_admin')
+    .single();
   
-  const row = result[0];
+  if (error || !data) {
+    throw new Error(error?.message || 'Failed to create user');
+  }
+  
   return {
-    id: row.id,
-    email: row.email,
-    name: row.name,
-    is_admin: row.is_admin ?? false,
+    id: data.id,
+    email: data.email,
+    name: data.name,
+    is_admin: data.is_admin ?? false,
   };
 }
 

@@ -23,7 +23,8 @@ function generateId() {
 export const authApi = USE_DATABASE ? dbApi.authApi : {
   async login(email: string, _password: string): Promise<AuthResponse> {
     await delay();
-    const user = mockUsers.find(u => u.email === email);
+    const emailLower = email.toLowerCase().trim();
+    const user = mockUsers.find(u => u.email.toLowerCase() === emailLower);
     if (!user) throw new Error("Invalid credentials");
     return { user, token: "mock-jwt-" + user.id };
   },
@@ -209,5 +210,13 @@ export const adminApi = USE_DATABASE ? dbApi.adminApi : {
   async getStats(): Promise<{ courses: number; users: number; plans: number; presets: number }> {
     await delay();
     return { courses: courses.length, users: mockUsers.length, plans: plans.length, presets: presets.length };
+  },
+  async importCourses(): Promise<{ success: boolean; message: string; output?: string; error?: string }> {
+    await delay(2000);
+    throw new Error('Database import only available when database is connected');
+  },
+  async getImportStatus(): Promise<{ hasData: boolean; totalCourses?: number; statistics?: any }> {
+    await delay();
+    return { hasData: false };
   },
 };

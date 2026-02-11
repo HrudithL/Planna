@@ -11,6 +11,7 @@ CREATE TABLE schools (
 -- Courses table
 CREATE TABLE courses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    uuid UUID, -- Original UUID from source system
     course_code VARCHAR(50) NOT NULL,
     course_name VARCHAR(255) NOT NULL,
     credits DECIMAL(3, 1) NOT NULL DEFAULT 0,
@@ -21,6 +22,10 @@ CREATE TABLE courses (
     corequisite_text TEXT, -- Store the raw corequisite string
     enrollment_notes TEXT,
     course_description TEXT,
+    elective BOOLEAN DEFAULT FALSE,
+    length INTEGER DEFAULT 1, -- Number of semesters (1 or 2)
+    source_endpoint TEXT, -- API endpoint where course was scraped from
+    source_page_url TEXT, -- Original page URL if available
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(course_code)
@@ -31,6 +36,7 @@ CREATE TABLE course_tags (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     tag VARCHAR(50) NOT NULL,
+    tag_uuid UUID, -- Original UUID from source system
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(course_id, tag)
 );
@@ -40,7 +46,11 @@ CREATE TABLE course_eligible_grades (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     grade VARCHAR(20) NOT NULL, -- "9th", "10th", "11th", "12th"
-    UNIQUE(course_id, grade)
+    academic_term INTEGER, -- 1 for Semester 1, 2 for Semester 2
+    academic_term_name VARCHAR(50), -- "Semester 1", "Semester 2"
+    can_plan BOOLEAN DEFAULT TRUE, -- Whether course can be planned in this term
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(course_id, grade, academic_term)
 );
 
 -- Course prerequisites (structured relationship for courses that reference other courses)
@@ -102,6 +112,7 @@ CREATE TABLE plan_courses (
 -- Indexes for performance
 CREATE INDEX idx_courses_course_code ON courses(course_code);
 CREATE INDEX idx_courses_subject ON courses(subject);
+CREATE INDEX idx_courses_uuid ON courses(uuid);
 CREATE INDEX idx_course_tags_course_id ON course_tags(course_id);
 CREATE INDEX idx_course_eligible_grades_course_id ON course_eligible_grades(course_id);
 CREATE INDEX idx_course_prerequisites_course_id ON course_prerequisites(course_id);
@@ -113,13 +124,3 @@ CREATE INDEX idx_degree_plans_preset ON degree_plans(is_preset, preset_category)
 CREATE INDEX idx_plan_courses_degree_plan_id ON plan_courses(degree_plan_id);
 CREATE INDEX idx_plan_courses_course_id ON plan_courses(course_id);
 CREATE INDEX idx_users_email ON users(email);
-
-
-
-
--- Schema design notes
--- Schools support: course_schools is a many-to-many join. When schools are added, populate this table; no schema changes needed.
--- Prerequisites: stored as text and optionally linked to courses. Supports both "n/a" and course name references.
--- Tags and grades: normalized into separate tables for querying and filtering.
--- Preset plans: degree_plans.is_preset and preset_category distinguish admin presets from user plans.
--- Plan courses: supports semester/year placement and ordering.

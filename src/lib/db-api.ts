@@ -20,7 +20,9 @@ export const authApi = {
       throw new Error('Database not available');
     }
     
-    const user = await userQueries.getUserByEmail(email);
+    // Normalize email to lowercase and trim whitespace
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await userQueries.getUserByEmail(normalizedEmail);
     if (!user) throw new Error("Invalid credentials");
     
     // TODO: Implement proper password hashing and verification
@@ -254,6 +256,89 @@ export const adminApi = {
     
     // TODO: Implement actual stats queries
     return { courses: 0, users: 0, plans: 0, presets: 0 };
+  },
+
+  async importCourses(): Promise<{ success: boolean; message: string; output?: string; error?: string }> {
+    // Use proxy in dev, or direct URL in production
+    const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3001');
+    const fullUrl = `${API_URL}/api/admin/import-courses`;
+    
+    try {
+      // Set a very long timeout (45 minutes) to wait for the import to complete
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45 * 60 * 1000); // 45 minutes
+      
+      const response = await fetch(fullUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        // Try to get error message from response
+        let errorMessage = `HTTP ${response.status}: ${response.statusText || 'Server error'}`;
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            // Build a comprehensive error message
+            errorMessage = errorData.message || 'Failed to import courses';
+            if (errorData.error) {
+              // Include error details if available
+              const errorDetail = typeof errorData.error === 'string' 
+                ? errorData.error.substring(0, 500) 
+                : String(errorData.error).substring(0, 500);
+              if (errorDetail && !errorMessage.includes(errorDetail)) {
+                errorMessage += `\n\nError details: ${errorDetail}`;
+              }
+            }
+          } else {
+            const text = await response.text();
+            if (text) {
+              errorMessage = `HTTP ${response.status}: ${text.substring(0, 500) || response.statusText || 'Server error'}`;
+            }
+          }
+        } catch (e) {
+          // Keep the default error message
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error: any) {
+      // If it's a network error (server not running), provide a helpful message
+      if (error?.name === 'TypeError' && error?.message?.includes('fetch')) {
+        throw new Error('Backend server is not running. Please start it with: npm run dev:server');
+      }
+      // If it's an abort error (timeout), provide a helpful message
+      if (error?.name === 'AbortError') {
+        throw new Error('Import request timed out. The import may still be running on the server. Please check the server logs.');
+      }
+      throw error;
+    }
+  },
+
+  async getImportStatus(): Promise<{ hasData: boolean; totalCourses?: number; statistics?: any }> {
+    // Use proxy in dev, or direct URL in production
+    const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3001');
+    
+    const response = await fetch(`${API_URL}/api/admin/import-status`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get import status');
+    }
+
+    return await response.json();
   },
 };
 

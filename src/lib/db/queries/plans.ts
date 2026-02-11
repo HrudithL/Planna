@@ -1,17 +1,20 @@
-import { sql } from '../index';
+import { supabase, isSupabaseAvailable } from '../../supabaseClient';
 import type { DegreePlan, PlanCourse } from '@/types';
 
 export async function getUserPlans(userId: string): Promise<DegreePlan[]> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    SELECT *
-    FROM degree_plans
-    WHERE user_id = ${userId} AND is_preset = FALSE
-    ORDER BY updated_at DESC
-  `;
+  const { data, error } = await supabase
+    .from('degree_plans')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_preset', false)
+    .order('updated_at', { ascending: false });
   
-  return result.map(row => ({
+  if (error) throw new Error(error.message);
+  if (!data) return [];
+  
+  return data.map(row => ({
     id: row.id,
     user_id: row.user_id,
     name: row.name,
@@ -24,67 +27,94 @@ export async function getUserPlans(userId: string): Promise<DegreePlan[]> {
 }
 
 export async function getPlanById(id: string): Promise<(DegreePlan & { courses: PlanCourse[] }) | null> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const planResult = await sql`
-    SELECT *
-    FROM degree_plans
-    WHERE id = ${id}
-  `;
+  // Get the plan
+  const { data: plan, error: planError } = await supabase
+    .from('degree_plans')
+    .select('*')
+    .eq('id', id)
+    .single();
   
-  if (planResult.length === 0) return null;
+  if (planError || !plan) return null;
   
-  const coursesResult = await sql`
-    SELECT 
-      pc.*,
-      c.course_code,
-      c.course_name,
-      c.credits,
-      c.gpa,
-      c.subject,
-      c.term,
-      c.prerequisite_text,
-      c.corequisite_text,
-      c.enrollment_notes,
-      c.course_description,
-      COALESCE(array_agg(DISTINCT t.tag) FILTER (WHERE t.tag IS NOT NULL), '{}') as tags,
-      COALESCE(array_agg(DISTINCT g.grade) FILTER (WHERE g.grade IS NOT NULL), '{}') as eligible_grades
-    FROM plan_courses pc
-    JOIN courses c ON pc.course_id = c.id
-    LEFT JOIN course_tags t ON c.id = t.course_id
-    LEFT JOIN course_eligible_grades g ON c.id = g.course_id
-    WHERE pc.degree_plan_id = ${id}
-    GROUP BY pc.id, c.id, c.course_code, c.course_name, c.credits, c.gpa, c.subject, c.term, 
-             c.prerequisite_text, c.corequisite_text, c.enrollment_notes, c.course_description
-    ORDER BY pc.year, pc.order_index
-  `;
+  // Get plan courses with basic course info
+  const { data: planCourses, error: coursesError } = await supabase
+    .from('plan_courses')
+    .select(`
+      *,
+      courses (
+        id, course_code, course_name, credits, gpa, subject, term,
+        prerequisite_text, corequisite_text, enrollment_notes, course_description
+      )
+    `)
+    .eq('degree_plan_id', id)
+    .order('year')
+    .order('order_index');
   
-  const plan = planResult[0];
-  const courses = coursesResult.map(row => ({
-    id: row.id,
-    degree_plan_id: row.degree_plan_id,
-    course_id: row.course_id,
-    semester: row.semester,
-    year: row.year,
-    grade_level: row.grade_level,
-    order_index: row.order_index,
-    notes: row.notes,
-    course: {
-      id: row.course_id,
-      course_code: row.course_code,
-      course_name: row.course_name,
-      credits: parseFloat(row.credits),
-      gpa: parseFloat(row.gpa),
-      subject: row.subject,
-      term: row.term,
-      prerequisite_text: row.prerequisite_text,
-      corequisite_text: row.corequisite_text,
-      enrollment_notes: row.enrollment_notes,
-      course_description: row.course_description,
-      tags: row.tags || [],
-      eligible_grades: row.eligible_grades || [],
-    },
-  }));
+  if (coursesError) throw new Error(coursesError.message);
+  
+  // If there are courses, fetch their tags and grades
+  let courses: PlanCourse[] = [];
+  if (planCourses && planCourses.length > 0) {
+    const courseIds = planCourses.map(pc => pc.course_id);
+    
+    // Fetch tags
+    const { data: tagsData } = await supabase
+      .from('course_tags')
+      .select('course_id, tag')
+      .in('course_id', courseIds);
+    
+    // Fetch grades
+    const { data: gradesData } = await supabase
+      .from('course_eligible_grades')
+      .select('course_id, grade')
+      .in('course_id', courseIds);
+    
+    // Group tags and grades by course_id
+    const tagsByCourse: Record<string, string[]> = {};
+    const gradesByCourse: Record<string, string[]> = {};
+    
+    (tagsData || []).forEach(t => {
+      if (!tagsByCourse[t.course_id]) tagsByCourse[t.course_id] = [];
+      tagsByCourse[t.course_id].push(t.tag);
+    });
+    
+    (gradesData || []).forEach(g => {
+      if (!gradesByCourse[g.course_id]) gradesByCourse[g.course_id] = [];
+      gradesByCourse[g.course_id].push(g.grade);
+    });
+    
+    // Assemble the courses with all their data
+    courses = planCourses.map(pc => {
+      const courseData = pc.courses as any;
+      return {
+        id: pc.id,
+        degree_plan_id: pc.degree_plan_id,
+        course_id: pc.course_id,
+        semester: pc.semester,
+        year: pc.year,
+        grade_level: pc.grade_level,
+        order_index: pc.order_index,
+        notes: pc.notes,
+        course: {
+          id: courseData.id,
+          course_code: courseData.course_code,
+          course_name: courseData.course_name,
+          credits: typeof courseData.credits === 'string' ? parseFloat(courseData.credits) : courseData.credits,
+          gpa: typeof courseData.gpa === 'string' ? parseFloat(courseData.gpa) : courseData.gpa,
+          subject: courseData.subject,
+          term: courseData.term,
+          prerequisite_text: courseData.prerequisite_text,
+          corequisite_text: courseData.corequisite_text,
+          enrollment_notes: courseData.enrollment_notes,
+          course_description: courseData.course_description,
+          tags: tagsByCourse[courseData.id] || [],
+          eligible_grades: gradesByCourse[courseData.id] || [],
+        },
+      };
+    });
+  }
   
   return {
     id: plan.id,
@@ -100,60 +130,70 @@ export async function getPlanById(id: string): Promise<(DegreePlan & { courses: 
 }
 
 export async function createPlan(userId: string, name: string, description: string | null): Promise<DegreePlan> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    INSERT INTO degree_plans (user_id, name, description, is_preset)
-    VALUES (${userId}, ${name}, ${description}, FALSE)
-    RETURNING *
-  `;
+  const { data, error } = await supabase
+    .from('degree_plans')
+    .insert({ user_id: userId, name, description, is_preset: false })
+    .select()
+    .single();
   
-  const plan = result[0];
+  if (error || !data) {
+    throw new Error(error?.message || 'Failed to create plan');
+  }
+  
   return {
-    id: plan.id,
-    user_id: plan.user_id,
-    name: plan.name,
-    description: plan.description,
-    is_preset: plan.is_preset,
-    preset_category: plan.preset_category,
-    created_at: plan.created_at,
-    updated_at: plan.updated_at,
+    id: data.id,
+    user_id: data.user_id,
+    name: data.name,
+    description: data.description,
+    is_preset: data.is_preset,
+    preset_category: data.preset_category,
+    created_at: data.created_at,
+    updated_at: data.updated_at,
   };
 }
 
-export async function updatePlan(id: string, data: Partial<DegreePlan>): Promise<DegreePlan> {
-  if (!sql) throw new Error('Database not available');
+export async function updatePlan(id: string, updates: Partial<DegreePlan>): Promise<DegreePlan> {
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    UPDATE degree_plans
-    SET 
-      name = COALESCE(${data.name}, name),
-      description = COALESCE(${data.description}, description),
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${id}
-    RETURNING *
-  `;
+  const updateData: any = {};
+  if (updates.name !== undefined) updateData.name = updates.name;
+  if (updates.description !== undefined) updateData.description = updates.description;
+  updateData.updated_at = new Date().toISOString();
   
-  const plan = result[0];
+  const { data, error } = await supabase
+    .from('degree_plans')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error || !data) {
+    throw new Error(error?.message || 'Failed to update plan');
+  }
+  
   return {
-    id: plan.id,
-    user_id: plan.user_id,
-    name: plan.name,
-    description: plan.description,
-    is_preset: plan.is_preset,
-    preset_category: plan.preset_category,
-    created_at: plan.created_at,
-    updated_at: plan.updated_at,
+    id: data.id,
+    user_id: data.user_id,
+    name: data.name,
+    description: data.description,
+    is_preset: data.is_preset,
+    preset_category: data.preset_category,
+    created_at: data.created_at,
+    updated_at: data.updated_at,
   };
 }
 
 export async function deletePlan(id: string): Promise<void> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  await sql`
-    DELETE FROM degree_plans
-    WHERE id = ${id}
-  `;
+  const { error } = await supabase
+    .from('degree_plans')
+    .delete()
+    .eq('id', id);
+  
+  if (error) throw new Error(error.message);
 }
 
 export async function addCourseToPlan(
@@ -163,48 +203,68 @@ export async function addCourseToPlan(
   year: number,
   gradeLevel: string
 ): Promise<PlanCourse> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
   // Get the max order_index for this plan/semester/year
-  const maxOrderResult = await sql`
-    SELECT COALESCE(MAX(order_index), -1) as max_order
-    FROM plan_courses
-    WHERE degree_plan_id = ${planId}
-      AND semester = ${semester}
-      AND year = ${year}
-  `;
+  const { data: maxOrderData } = await supabase
+    .from('plan_courses')
+    .select('order_index')
+    .eq('degree_plan_id', planId)
+    .eq('semester', semester)
+    .eq('year', year)
+    .order('order_index', { ascending: false })
+    .limit(1);
   
-  const orderIndex = maxOrderResult[0].max_order + 1;
+  const orderIndex = (maxOrderData && maxOrderData.length > 0 && maxOrderData[0].order_index !== null) 
+    ? maxOrderData[0].order_index + 1 
+    : 0;
   
-  const result = await sql`
-    INSERT INTO plan_courses (degree_plan_id, course_id, semester, year, grade_level, order_index)
-    VALUES (${planId}, ${courseId}, ${semester}, ${year}, ${gradeLevel}, ${orderIndex})
-    RETURNING *
-  `;
+  const { data, error } = await supabase
+    .from('plan_courses')
+    .insert({
+      degree_plan_id: planId,
+      course_id: courseId,
+      semester,
+      year,
+      grade_level: gradeLevel,
+      order_index: orderIndex,
+    })
+    .select()
+    .single();
   
-  return result[0];
+  if (error || !data) {
+    throw new Error(error?.message || 'Failed to add course to plan');
+  }
+  
+  return data;
 }
 
 export async function removeCourseFromPlan(planId: string, planCourseId: string): Promise<void> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  await sql`
-    DELETE FROM plan_courses
-    WHERE id = ${planCourseId} AND degree_plan_id = ${planId}
-  `;
+  const { error } = await supabase
+    .from('plan_courses')
+    .delete()
+    .eq('id', planCourseId)
+    .eq('degree_plan_id', planId);
+  
+  if (error) throw new Error(error.message);
 }
 
 export async function getAllPresets(): Promise<DegreePlan[]> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  const result = await sql`
-    SELECT *
-    FROM degree_plans
-    WHERE is_preset = TRUE
-    ORDER BY preset_category, name
-  `;
+  const { data, error } = await supabase
+    .from('degree_plans')
+    .select('*')
+    .eq('is_preset', true)
+    .order('preset_category')
+    .order('name');
   
-  return result.map(row => ({
+  if (error) throw new Error(error.message);
+  if (!data) return [];
+  
+  return data.map(row => ({
     id: row.id,
     user_id: row.user_id,
     name: row.name,
@@ -217,27 +277,33 @@ export async function getAllPresets(): Promise<DegreePlan[]> {
 }
 
 export async function clonePreset(presetId: string, userId: string): Promise<DegreePlan> {
-  if (!sql) throw new Error('Database not available');
+  if (!isSupabaseAvailable()) throw new Error('Database not available');
   
-  // Get the preset
+  // Get the preset with its courses
   const preset = await getPlanById(presetId);
   if (!preset) throw new Error('Preset not found');
   
   // Create new plan
   const newPlan = await createPlan(userId, `${preset.name} (Copy)`, preset.description);
   
-  // Copy all courses
+  // Copy all courses if there are any
   if (preset.courses && preset.courses.length > 0) {
-    await sql`
-      INSERT INTO plan_courses (degree_plan_id, course_id, semester, year, grade_level, order_index, notes)
-      SELECT ${newPlan.id}, course_id, semester, year, grade_level, order_index, notes
-      FROM plan_courses
-      WHERE degree_plan_id = ${presetId}
-    `;
+    const coursesToInsert = preset.courses.map(pc => ({
+      degree_plan_id: newPlan.id,
+      course_id: pc.course_id,
+      semester: pc.semester,
+      year: pc.year,
+      grade_level: pc.grade_level,
+      order_index: pc.order_index,
+      notes: pc.notes,
+    }));
+    
+    const { error } = await supabase
+      .from('plan_courses')
+      .insert(coursesToInsert);
+    
+    if (error) throw new Error(error.message);
   }
   
   return newPlan;
 }
-
-
-
