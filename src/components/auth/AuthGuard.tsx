@@ -17,7 +17,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { isAdmin, isLoading } = useAuth();
+  const { isAdmin, isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -27,6 +27,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!isAdmin) return <Navigate to="/dashboard/plans" replace />;
   return <>{children}</>;
 }

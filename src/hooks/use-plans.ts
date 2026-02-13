@@ -40,8 +40,8 @@ export function useDeletePlan() {
 export function useAddCourseToPlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { planId: string; courseId: string; semester: string; year: number; gradeLevel: string }) =>
-      plansApi.addCourse(args.planId, args.courseId, args.semester, args.year, args.gradeLevel),
+    mutationFn: (args: { planId: string; courseId: string; termIndex: number; yearIndex: number; gradeLevel: string }) =>
+      plansApi.addCourse(args.planId, args.courseId, args.termIndex, args.yearIndex, args.gradeLevel),
     onSuccess: (_, vars) => qc.invalidateQueries({ queryKey: ["plan", vars.planId] }),
   });
 }

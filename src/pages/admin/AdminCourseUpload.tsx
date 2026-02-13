@@ -1,10 +1,10 @@
 import { useState, useRef } from "react";
-import { coursesApi } from "@/lib/api";
+import { coursesApi, adminApi } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, FileJson, CheckCircle2, AlertCircle } from "lucide-react";
+import { Upload, FileJson, CheckCircle2, AlertCircle, Wrench } from "lucide-react";
 
 export default function AdminCourseUpload() {
   const { toast } = useToast();
@@ -12,8 +12,10 @@ export default function AdminCourseUpload() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<any[] | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<{ added: number } | null>(null);
+  const [result, setResult] = useState<{ added: number; updated?: number; markedNotOffered?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [fixResult, setFixResult] = useState<{ fixed: number; errors: number } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -24,9 +26,23 @@ export default function AdminCourseUpload() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const data = JSON.parse(ev.target?.result as string);
-        if (!Array.isArray(data)) throw new Error("JSON must be an array of courses");
-        setPreview(data);
+        const raw = JSON.parse(ev.target?.result as string);
+
+        let courses: any[] | null = null;
+
+        if (Array.isArray(raw)) {
+          // Backwards compatibility: plain array of course objects
+          courses = raw;
+        } else if (raw && Array.isArray(raw.courses)) {
+          // New format: step5_final.json style { "courses": [ ... ] }
+          courses = raw.courses;
+        }
+
+        if (!courses) {
+          throw new Error("JSON must be either an array of courses or an object with a 'courses' array");
+        }
+
+        setPreview(courses);
       } catch (err: any) {
         setError(err.message || "Invalid JSON file");
         setPreview(null);
@@ -51,17 +67,65 @@ export default function AdminCourseUpload() {
     }
   };
 
+  const handleFixEligibility = async () => {
+    setFixing(true);
+    setFixResult(null);
+    setError(null);
+    try {
+      const res = await adminApi.fixMissingEligibility();
+      setFixResult(res);
+      qc.invalidateQueries({ queryKey: ["courses"] });
+      toast({ 
+        title: `Fixed ${res.fixed} courses`, 
+        description: res.errors > 0 ? `${res.errors} errors occurred` : undefined 
+      });
+    } catch (err: any) {
+      setError(err.message || "Fix failed");
+    } finally {
+      setFixing(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-foreground">Upload Courses</h1>
-        <p className="text-muted-foreground">Import courses from a JSON file</p>
+        <p className="text-muted-foreground">
+          Import courses from a JSON file (for example, the api_surface_mapper <code>step5_final.json</code> format).
+        </p>
       </div>
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-lg">Fix Missing Grades</CardTitle>
+          <CardDescription>
+            If courses are missing grade eligibility information, this will extract it from the stored course data and populate missing records.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button onClick={handleFixEligibility} disabled={fixing} variant="outline">
+            <Wrench className="mr-2 h-4 w-4" />
+            {fixing ? "Fixing…" : "Fix Missing Eligibility Records"}
+          </Button>
+
+          {fixResult && (
+            <div className="flex items-center gap-2 rounded-md border border-success/50 bg-success/10 p-3 text-sm text-success">
+              <CheckCircle2 className="h-4 w-4" /> Fixed {fixResult.fixed} courses
+              {fixResult.errors > 0 && (
+                <span className="text-destructive"> ({fixResult.errors} errors)</span>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-lg">Upload JSON File</CardTitle>
-          <CardDescription>Select a JSON file containing an array of course objects</CardDescription>
+          <CardDescription>
+            Select a JSON file containing either an array of courses or an object with a <code>courses</code> array, matching
+            the structure of <code>step5_final.json</code>.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div
@@ -81,8 +145,15 @@ export default function AdminCourseUpload() {
           )}
 
           {result && (
-            <div className="flex items-center gap-2 rounded-md border border-success/50 bg-success/10 p-3 text-sm text-success">
-              <CheckCircle2 className="h-4 w-4" /> Successfully imported {result.added} courses
+            <div className="space-y-1 rounded-md border border-success/50 bg-success/10 p-3 text-sm text-success">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" /> Import complete
+              </div>
+              <ul className="ml-6 list-disc text-xs">
+                <li>{result.added} new courses added</li>
+                {(result.updated ?? 0) > 0 && <li>{result.updated} courses updated</li>}
+                {(result.markedNotOffered ?? 0) > 0 && <li>{result.markedNotOffered} courses marked as not offered</li>}
+              </ul>
             </div>
           )}
         </CardContent>

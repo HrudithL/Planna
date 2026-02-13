@@ -4,85 +4,41 @@
  */
 import * as courseQueries from './db/queries/courses';
 import * as planQueries from './db/queries/plans';
-import * as userQueries from './db/queries/users';
-import { isDatabaseAvailable } from './db';
-import type { Course, DegreePlan, PlanCourse, CourseFilters, User, AuthResponse } from "@/types";
-
-// Simulates network delay for consistency with mock API
-const delay = (ms = 200) => new Promise(res => setTimeout(res, ms));
+import * as adminQueries from './db/queries/admin';
+import { isDatabaseAvailable, supabase } from './db';
+import type { Course, CourseVariant, Plan, PlanCourse, CourseFilters, User, AuthResponse } from "@/types";
+import { termIndexFromLabel } from "@/types";
 
 // ── Auth ──
+// NOTE: The old custom `users` table has been dropped.
+// Auth should be migrated to Supabase Auth (auth.users).
+// For now, auth is handled via mock data fallback.
 export const authApi = {
-  async login(email: string, password: string): Promise<AuthResponse> {
-    await delay();
-    
-    if (!isDatabaseAvailable()) {
-      throw new Error('Database not available');
-    }
-    
-    // Normalize email to lowercase and trim whitespace
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await userQueries.getUserByEmail(normalizedEmail);
-    if (!user) throw new Error("Invalid credentials");
-    
-    // TODO: Implement proper password hashing and verification
-    // For now, accept any password
-    return { user, token: "jwt-" + user.id };
+  async login(_email: string, _password: string): Promise<AuthResponse> {
+    throw new Error('Auth not yet implemented with new schema. Please use mock data mode.');
   },
   
-  async signup(email: string, password: string, name: string): Promise<AuthResponse> {
-    await delay();
-    
-    if (!isDatabaseAvailable()) {
-      throw new Error('Database not available');
-    }
-    
-    // TODO: Implement proper password hashing
-    const passwordHash = password; // Temporary - should use bcrypt
-    const user = await userQueries.createUser(email, name, passwordHash);
-    return { user, token: "jwt-" + user.id };
+  async signup(_email: string, _password: string, _name: string): Promise<AuthResponse> {
+    throw new Error('Auth not yet implemented with new schema. Please use mock data mode.');
   },
 };
 
 // ── Courses ──
 export const coursesApi = {
-  async getAll(filters?: CourseFilters): Promise<Course[]> {
-    await delay();
-    
+  /**
+   * Fetch all courses enriched with tags + grades in a single RPC call.
+   * Filtering is now done client-side via useCourseSearch hook.
+   * This method is kept for backwards compatibility with existing code.
+   */
+  async getAll(_filters?: CourseFilters): Promise<Course[]> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
     
-    let courses = await courseQueries.getAllCourses();
-    
-    // Apply filters client-side (could be optimized with SQL WHERE clauses)
-    if (filters) {
-      if (filters.search) {
-        courses = await courseQueries.searchCourses(filters.search);
-      }
-      if (filters.subject) {
-        courses = courses.filter(c => c.subject === filters.subject);
-      }
-      if (filters.grades && filters.grades.length) {
-        courses = courses.filter(c => c.eligible_grades.some(g => filters.grades.includes(g)));
-      }
-      if (filters.tags && filters.tags.length) {
-        courses = courses.filter(c => c.tags.some(t => filters.tags.includes(t)));
-      }
-      if (filters.minCredits !== undefined) {
-        courses = courses.filter(c => c.credits >= filters.minCredits!);
-      }
-      if (filters.maxCredits !== undefined) {
-        courses = courses.filter(c => c.credits <= filters.maxCredits!);
-      }
-    }
-    
-    return courses;
+    return await courseQueries.getAllCoursesEnriched();
   },
   
   async getById(id: string): Promise<Course> {
-    await delay();
-    
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -92,18 +48,103 @@ export const coursesApi = {
     return course;
   },
   
-  async uploadJson(data: any[]): Promise<{ added: number }> {
-    await delay();
-    // TODO: Implement bulk course upload to database
-    throw new Error('Database upload not yet implemented - use import scripts');
+  /**
+   * Bulk upload courses from a JSON file.
+   * Expects data in the step6_admin_upload.json format.
+   * Routes through backend API to use service role key (bypasses RLS).
+   */
+  async uploadJson(data: any[]): Promise<{ added: number; updated: number; markedNotOffered: number }> {
+    if (!isDatabaseAvailable()) {
+      throw new Error('Database not available');
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return { added: 0, updated: 0, markedNotOffered: 0 };
+    }
+
+    // Call backend API with service role instead of direct Supabase client
+    const response = await fetch('http://localhost:3001/api/admin/import-courses-from-json', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Import failed' }));
+      throw new Error(errorData.message || `Import failed with status ${response.status}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error(result.message || 'Import failed');
+    }
+
+    // Map backend response to expected format
+    return {
+      added: result.stats.coursesCreated || 0,
+      updated: result.stats.coursesUpdated || 0,
+      markedNotOffered: result.stats.coursesMarkedNotOffered || 0,
+    };
+  },
+
+  async update(id: string, updates: Partial<Course> & { tags?: string[]; eligible_grades?: string[] }): Promise<Course> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+
+    return await courseQueries.updateCourse(id, updates);
+  },
+
+  async create(courseData: Parameters<typeof courseQueries.createCourse>[0]): Promise<Course> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.createCourse(courseData);
+  },
+
+  async getSubjects(): Promise<string[]> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.getSubjects();
+  },
+
+  async getTags(): Promise<string[]> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.getTags();
+  },
+
+  async getTermEligibility(courseId: string, grade: string): Promise<number[]> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.getCourseTermEligibility(courseId, grade);
+  },
+
+  async checkPrerequisitesMet(courseId: string, completedCourseCodes: string[]): Promise<{ met: boolean; unmet: string[] }> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.checkPrerequisitesMet(courseId, completedCourseCodes);
+  },
+};
+
+// ── Variants ──
+export const variantsApi = {
+  async getForCourse(courseId: string): Promise<CourseVariant[]> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.getVariantsForCourse(courseId);
+  },
+  async create(courseId: string, variant: Omit<CourseVariant, 'id' | 'course_id'>): Promise<CourseVariant> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.createVariant(courseId, variant);
+  },
+  async update(variantId: string, updates: Partial<CourseVariant>): Promise<CourseVariant> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await courseQueries.updateVariant(variantId, updates);
+  },
+  async delete(variantId: string): Promise<void> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    await courseQueries.deleteVariant(variantId);
   },
 };
 
 // ── Plans ──
 export const plansApi = {
-  async getUserPlans(userId: string): Promise<DegreePlan[]> {
-    await delay();
-    
+  async getUserPlans(userId: string): Promise<Plan[]> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -111,9 +152,7 @@ export const plansApi = {
     return await planQueries.getUserPlans(userId);
   },
   
-  async getById(id: string): Promise<DegreePlan & { courses: PlanCourse[] }> {
-    await delay();
-    
+  async getById(id: string): Promise<Plan & { courses: PlanCourse[] }> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -123,9 +162,7 @@ export const plansApi = {
     return plan;
   },
   
-  async create(userId: string, name: string, description: string): Promise<DegreePlan> {
-    await delay();
-    
+  async create(userId: string, name: string, description: string): Promise<Plan> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -133,9 +170,7 @@ export const plansApi = {
     return await planQueries.createPlan(userId, name, description);
   },
   
-  async update(id: string, data: Partial<DegreePlan>): Promise<DegreePlan> {
-    await delay();
-    
+  async update(id: string, data: Partial<Plan>): Promise<Plan> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -144,8 +179,6 @@ export const plansApi = {
   },
   
   async delete(id: string): Promise<void> {
-    await delay();
-    
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -153,19 +186,15 @@ export const plansApi = {
     await planQueries.deletePlan(id);
   },
   
-  async addCourse(planId: string, courseId: string, semester: string, year: number, gradeLevel: string): Promise<PlanCourse> {
-    await delay();
-    
+  async addCourse(planId: string, courseId: string, termIndex: number, yearIndex: number, gradeLevel: string): Promise<PlanCourse> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
     
-    return await planQueries.addCourseToPlan(planId, courseId, semester, year, gradeLevel);
+    return await planQueries.addCourseToPlan(planId, courseId, termIndex, yearIndex, gradeLevel);
   },
   
   async removeCourse(planId: string, planCourseId: string): Promise<void> {
-    await delay();
-    
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -173,15 +202,12 @@ export const plansApi = {
     await planQueries.removeCourseFromPlan(planId, planCourseId);
   },
   
-  async reorderCourses(planId: string, updatedCourses: PlanCourse[]): Promise<void> {
-    await delay();
+  async reorderCourses(_planId: string, _updatedCourses: PlanCourse[]): Promise<void> {
     // TODO: Implement reordering in database
     throw new Error('Reordering not yet implemented');
   },
   
   async exportCsv(id: string): Promise<string> {
-    await delay();
-    
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -189,19 +215,17 @@ export const plansApi = {
     const plan = await planQueries.getPlanById(id);
     if (!plan) throw new Error("Plan not found");
     
-    const header = "Course Code,Course Name,Semester,Year,Grade Level,Credits\n";
+    const header = "Course Code,Course Name,Term,Year,Grade Level,Credits\n";
     const rows = plan.courses
       .map(pc => {
         const c = pc.course!;
-        return `${c.course_code},${c.course_name},${pc.semester},${pc.year},${pc.grade_level},${c.credits}`;
+        return `${c.external_course_code},${c.name},${pc.term_index ?? ''},${pc.year_index ?? ''},${pc.grade_level ?? ''},${c.credits}`;
       })
       .join("\n");
     return header + rows;
   },
   
-  async clonePreset(presetId: string, userId: string): Promise<DegreePlan> {
-    await delay();
-    
+  async clonePreset(presetId: string, userId: string): Promise<Plan> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -212,9 +236,7 @@ export const plansApi = {
 
 // ── Presets ──
 export const presetsApi = {
-  async getAll(): Promise<DegreePlan[]> {
-    await delay();
-    
+  async getAll(): Promise<Plan[]> {
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
@@ -226,47 +248,48 @@ export const presetsApi = {
     return plansApi.getById(id);
   },
   
-  async create(data: Partial<DegreePlan>): Promise<DegreePlan> {
-    await delay();
-    // TODO: Implement preset creation (admin only)
-    throw new Error('Preset creation not yet implemented');
+  async create(data: Partial<Plan>): Promise<Plan> {
+    if (!isDatabaseAvailable()) {
+      throw new Error('Database not available');
+    }
+    
+    return await planQueries.createPreset(data.name || 'New Preset', data.description || null);
   },
   
-  async update(id: string, data: Partial<DegreePlan>): Promise<DegreePlan> {
-    await delay();
-    // TODO: Implement preset update (admin only)
-    throw new Error('Preset update not yet implemented');
+  async update(id: string, data: Partial<Plan>): Promise<Plan> {
+    if (!isDatabaseAvailable()) {
+      throw new Error('Database not available');
+    }
+    
+    return await planQueries.updatePreset(id, data);
   },
   
   async delete(id: string): Promise<void> {
-    await delay();
-    // TODO: Implement preset deletion (admin only)
-    throw new Error('Preset deletion not yet implemented');
+    if (!isDatabaseAvailable()) {
+      throw new Error('Database not available');
+    }
+    
+    await planQueries.deletePreset(id);
   },
 };
 
 // ── Admin ──
 export const adminApi = {
   async getStats(): Promise<{ courses: number; users: number; plans: number; presets: number }> {
-    await delay();
-    
     if (!isDatabaseAvailable()) {
       throw new Error('Database not available');
     }
     
-    // TODO: Implement actual stats queries
-    return { courses: 0, users: 0, plans: 0, presets: 0 };
+    return await adminQueries.getAdminStats();
   },
 
   async importCourses(): Promise<{ success: boolean; message: string; output?: string; error?: string }> {
-    // Use proxy in dev, or direct URL in production
     const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3001');
     const fullUrl = `${API_URL}/api/admin/import-courses`;
     
     try {
-      // Set a very long timeout (45 minutes) to wait for the import to complete
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45 * 60 * 1000); // 45 minutes
+      const timeoutId = setTimeout(() => controller.abort(), 45 * 60 * 1000);
       
       const response = await fetch(fullUrl, {
         method: 'POST',
@@ -279,16 +302,13 @@ export const adminApi = {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        // Try to get error message from response
         let errorMessage = `HTTP ${response.status}: ${response.statusText || 'Server error'}`;
         try {
           const contentType = response.headers.get('content-type');
           if (contentType && contentType.includes('application/json')) {
             const errorData = await response.json();
-            // Build a comprehensive error message
             errorMessage = errorData.message || 'Failed to import courses';
             if (errorData.error) {
-              // Include error details if available
               const errorDetail = typeof errorData.error === 'string' 
                 ? errorData.error.substring(0, 500) 
                 : String(errorData.error).substring(0, 500);
@@ -302,7 +322,7 @@ export const adminApi = {
               errorMessage = `HTTP ${response.status}: ${text.substring(0, 500) || response.statusText || 'Server error'}`;
             }
           }
-        } catch (e) {
+        } catch (_e) {
           // Keep the default error message
         }
         throw new Error(errorMessage);
@@ -311,20 +331,17 @@ export const adminApi = {
       const result = await response.json();
       return result;
     } catch (error: any) {
-      // If it's a network error (server not running), provide a helpful message
       if (error?.name === 'TypeError' && error?.message?.includes('fetch')) {
         throw new Error('Backend server is not running. Please start it with: npm run dev:server');
       }
-      // If it's an abort error (timeout), provide a helpful message
       if (error?.name === 'AbortError') {
-        throw new Error('Import request timed out. The import may still be running on the server. Please check the server logs.');
+        throw new Error('Import request timed out. The import may still be running on the server.');
       }
       throw error;
     }
   },
 
   async getImportStatus(): Promise<{ hasData: boolean; totalCourses?: number; statistics?: any }> {
-    // Use proxy in dev, or direct URL in production
     const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3001');
     
     const response = await fetch(`${API_URL}/api/admin/import-status`, {
@@ -340,7 +357,157 @@ export const adminApi = {
 
     return await response.json();
   },
+
+  async fixMissingEligibility(): Promise<{ fixed: number; errors: number }> {
+    if (!isDatabaseAvailable()) {
+      throw new Error('Database not available');
+    }
+
+    const { data: courses, error: fetchError } = await supabase
+      .from('courses')
+      .select('id, external_course_code, raw_payload')
+      .not('raw_payload', 'is', null);
+
+    if (fetchError) {
+      throw new Error(fetchError.message);
+    }
+
+    if (!courses || courses.length === 0) {
+      return { fixed: 0, errors: 0 };
+    }
+
+    let fixed = 0;
+    let errors = 0;
+
+    for (const course of courses) {
+      try {
+        const rawPayload = course.raw_payload;
+        
+        let payload: any;
+        if (typeof rawPayload === 'string') {
+          try {
+            payload = JSON.parse(rawPayload);
+          } catch {
+            continue;
+          }
+        } else {
+          payload = rawPayload;
+        }
+
+        if (!payload || !Array.isArray(payload.grades_eligible)) {
+          continue;
+        }
+
+        const { error: deleteError } = await supabase
+          .from('course_eligibility')
+          .delete()
+          .eq('course_id', course.id);
+
+        if (deleteError) {
+          console.error(`Error deleting eligibility for course ${course.external_course_code}:`, deleteError);
+          errors++;
+          continue;
+        }
+
+        const eligibilityRows: any[] = [];
+        const grades: any[] = Array.isArray(payload.grades_eligible) ? payload.grades_eligible : [];
+        
+        grades.forEach((g: any) => {
+          if (!g || g.grade === undefined || g.grade === null) {
+            return;
+          }
+
+          const terms: any[] = Array.isArray(g.academic_term_offered) ? g.academic_term_offered : [];
+          
+          if (terms.length > 0) {
+            terms.forEach((t: any) => {
+              eligibilityRows.push({
+                course_id: course.id,
+                grade: String(g.grade),
+                term_number: t?.academic_term ?? null,
+                term_name: t?.name ?? null,
+                can_plan: t?.can_plan ?? true,
+              });
+            });
+          } else {
+            eligibilityRows.push({
+              course_id: course.id,
+              grade: String(g.grade),
+              term_number: null,
+              term_name: null,
+              can_plan: true,
+            });
+          }
+        });
+
+        if (eligibilityRows.length > 0) {
+          const { error: insertError } = await supabase
+            .from('course_eligibility')
+            .insert(eligibilityRows);
+
+          if (insertError) {
+            console.error(`Error inserting eligibility for course ${course.external_course_code}:`, insertError);
+            errors++;
+          } else {
+            fixed++;
+          }
+        }
+      } catch (error: any) {
+        console.error(`Error processing course ${course.external_course_code}:`, error);
+        errors++;
+      }
+    }
+
+    return { fixed, errors };
+  },
+
+  async getCoursesWithIssues() {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await adminQueries.getCoursesWithIssues();
+  },
+
+  async getCourseIdsWithIssues(): Promise<Set<string>> {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await adminQueries.getCourseIdsWithIssues();
+  },
+
+  async getCourseRelationships(courseId: string) {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    return await adminQueries.getCourseRelationships(courseId);
+  },
+
+  async fixCourseRelationship(relationshipId: string, relatedCourseId: string) {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    await adminQueries.fixCourseRelationship(relationshipId, relatedCourseId);
+  },
+
+  async deleteCourseRelationship(relationshipId: string) {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    await adminQueries.deleteCourseRelationship(relationshipId);
+  },
+
+  async addCourseRelationship(
+    courseId: string,
+    relatedCourseId: string,
+    relationshipType: 'prerequisite' | 'corequisite' | 'recommended',
+    description?: string,
+  ) {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    await adminQueries.addCourseRelationship(courseId, relatedCourseId, relationshipType, description);
+  },
+
+  async addCourseRelationshipByCode(
+    courseId: string,
+    relatedCourseCode: string,
+    relationshipType: 'prerequisite' | 'corequisite' | 'recommended',
+    description?: string,
+  ) {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    await adminQueries.addCourseRelationshipByCode(courseId, relatedCourseCode, relationshipType, description);
+  },
+
+  async updateRelationshipCourseCode(relationshipId: string, courseCode: string) {
+    if (!isDatabaseAvailable()) throw new Error('Database not available');
+    await adminQueries.updateRelationshipCourseCode(relationshipId, courseCode);
+  },
 };
-
-
-

@@ -60,6 +60,6 @@ Gets the status of the last import.
 
 - The import process can take 10-30 minutes depending on network speed
 - Make sure `SUPABASE_DB_URL` is set in your environment
-- The server will automatically detect the Python virtual environment in `api_puller/venv/`
+- The server will automatically detect the Python virtual environment in `data/venv/`
 - If no venv is found, it will fall back to system Python
 

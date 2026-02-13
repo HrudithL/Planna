@@ -24,8 +24,6 @@ CREATE TABLE courses (
     course_description TEXT,
     elective BOOLEAN DEFAULT FALSE,
     length INTEGER DEFAULT 1, -- Number of semesters (1 or 2)
-    source_endpoint TEXT, -- API endpoint where course was scraped from
-    source_page_url TEXT, -- Original page URL if available
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(course_code)
@@ -47,8 +45,6 @@ CREATE TABLE course_eligible_grades (
     course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     grade VARCHAR(20) NOT NULL, -- "9th", "10th", "11th", "12th"
     academic_term INTEGER, -- 1 for Semester 1, 2 for Semester 2
-    academic_term_name VARCHAR(50), -- "Semester 1", "Semester 2"
-    can_plan BOOLEAN DEFAULT TRUE, -- Whether course can be planned in this term
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(course_id, grade, academic_term)
 );

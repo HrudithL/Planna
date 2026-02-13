@@ -1,54 +1,66 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePresets } from "@/hooks/use-plans";
 import { presetsApi } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { PRESET_CATEGORIES } from "@/types";
-import { Plus, Trash2, Pencil, Layers } from "lucide-react";
+import { Plus, Trash2, Pencil, Layers, BookOpen } from "lucide-react";
 
 export default function AdminPresets() {
   const { data: presets, isLoading } = usePresets();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [showCreate, setShowCreate] = useState(false);
   const [editPreset, setEditPreset] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  const [category, setCategory] = useState("");
 
   const handleCreate = async () => {
     if (!name.trim()) return;
-    await presetsApi.create({ name, description: desc, preset_category: category || null });
-    qc.invalidateQueries({ queryKey: ["presets"] });
-    toast({ title: "Preset created" });
-    resetForm();
+    try {
+      const preset = await presetsApi.create({ name, description: desc });
+      qc.invalidateQueries({ queryKey: ["presets"] });
+      toast({ title: "Preset created — now add courses to it" });
+      resetForm();
+      // Navigate to the plan editor so the admin can add courses immediately
+      navigate(`/dashboard/plans/${preset.id}`);
+    } catch (e: any) {
+      toast({ title: "Error creating preset", description: e.message, variant: "destructive" });
+    }
   };
 
   const handleUpdate = async () => {
     if (!editPreset || !name.trim()) return;
-    await presetsApi.update(editPreset, { name, description: desc, preset_category: category || null });
-    qc.invalidateQueries({ queryKey: ["presets"] });
-    toast({ title: "Preset updated" });
-    resetForm();
+    try {
+      await presetsApi.update(editPreset, { name, description: desc });
+      qc.invalidateQueries({ queryKey: ["presets"] });
+      toast({ title: "Preset updated" });
+      resetForm();
+    } catch (e: any) {
+      toast({ title: "Error updating preset", description: e.message, variant: "destructive" });
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    await presetsApi.delete(deleteId);
-    qc.invalidateQueries({ queryKey: ["presets"] });
-    toast({ title: "Preset deleted" });
-    setDeleteId(null);
+    try {
+      await presetsApi.delete(deleteId);
+      qc.invalidateQueries({ queryKey: ["presets"] });
+      toast({ title: "Preset deleted" });
+      setDeleteId(null);
+    } catch (e: any) {
+      toast({ title: "Error deleting preset", description: e.message, variant: "destructive" });
+    }
   };
 
   const openEdit = (id: string) => {
@@ -56,7 +68,6 @@ export default function AdminPresets() {
     if (!p) return;
     setName(p.name);
     setDesc(p.description || "");
-    setCategory(p.preset_category || "");
     setEditPreset(id);
   };
 
@@ -65,7 +76,6 @@ export default function AdminPresets() {
     setEditPreset(null);
     setName("");
     setDesc("");
-    setCategory("");
   };
 
   return (
@@ -97,14 +107,16 @@ export default function AdminPresets() {
           {presets?.map(p => (
             <Card key={p.id}>
               <CardHeader>
-                {p.preset_category && <Badge className="mb-1 w-fit">{p.preset_category}</Badge>}
                 <CardTitle className="text-lg">{p.name}</CardTitle>
                 <CardDescription>{p.description}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/dashboard/plans/${p.id}`)}>
+                    <BookOpen className="mr-1 h-3 w-3" /> Edit Courses
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => openEdit(p.id)}>
-                    <Pencil className="mr-1 h-3 w-3" /> Edit
+                    <Pencil className="mr-1 h-3 w-3" /> Edit Details
                   </Button>
                   <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setDeleteId(p.id)}>
                     <Trash2 className="h-3 w-3" />
@@ -121,21 +133,16 @@ export default function AdminPresets() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editPreset ? "Edit Preset" : "Create Preset"}</DialogTitle>
-            <DialogDescription>Define the preset plan details.</DialogDescription>
+            <DialogDescription>
+              {editPreset
+                ? "Update the preset plan details."
+                : "Define the preset plan details. After creating, you'll be taken to the plan editor to add courses."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
               <label className="mb-1 block text-sm font-medium">Name</label>
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Computer Science Track" />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Category</label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                <SelectContent>
-                  {PRESET_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Description</label>
@@ -154,7 +161,7 @@ export default function AdminPresets() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Preset</AlertDialogTitle>
-            <AlertDialogDescription>This will permanently delete this preset plan.</AlertDialogDescription>
+            <AlertDialogDescription>This will permanently delete this preset plan and all its courses.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFile } from 'fs/promises';
 import dotenv from 'dotenv';
+import { importCoursesFromJson } from './importCourses.js';
 
 // Load environment variables from .env.local or .env
 const __filename = fileURLToPath(import.meta.url);
@@ -32,11 +33,67 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Increase limit for large course JSON files
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Import courses from uploaded JSON (Admin only)
+app.post('/api/admin/import-courses-from-json', async (req, res) => {
+  try {
+    console.log('Received course import request');
+    
+    // Validate environment variables
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server configuration error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set',
+      });
+    }
+
+    // Expect JSON array directly in body
+    const coursesData = req.body;
+
+    // Validate input
+    if (!Array.isArray(coursesData)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid request: body must be an array of course objects',
+      });
+    }
+
+    if (coursesData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid request: courses array is empty',
+      });
+    }
+
+    console.log(`Starting import of ${coursesData.length} courses...`);
+
+    // Run the import
+    const stats = await importCoursesFromJson(coursesData, (msg) => {
+      // Progress callback - log to console
+      console.log(msg);
+    });
+
+    // Return success with stats
+    res.json({
+      success: true,
+      message: 'Course import completed successfully',
+      stats: stats
+    });
+
+  } catch (error) {
+    console.error('Error during course import:', error);
+    res.status(500).json({
+      success: false,
+      message: `Import failed: ${error.message}`,
+      error: error.stack
+    });
+  }
 });
 
 // Import courses endpoint
@@ -44,7 +101,7 @@ app.post('/api/admin/import-courses', async (req, res) => {
   try {
     // Get the path to the Python script
     const projectRoot = join(__dirname, '..');
-    const scriptPath = join(projectRoot, 'api_puller', 'import_all.py');
+    const scriptPath = join(projectRoot, 'data', 'import_all.py');
     
     // Verify script exists
     try {
@@ -57,24 +114,24 @@ app.post('/api/admin/import-courses', async (req, res) => {
       });
     }
     
-    // Try to find Python in venv (Windows)
-    const venvPythonWin = join(projectRoot, 'api_puller', 'venv', 'Scripts', 'python.exe');
-    // Try to find Python in venv (Unix/Mac)
-    const venvPythonUnix = join(projectRoot, 'api_puller', 'venv', 'bin', 'python');
-    
+    // Prefer the dedicated Python virtual environment under data/venv if present.
+    // This keeps all scraper/import dependencies isolated inside the data pipeline.
+    const venvPythonWin = join(projectRoot, 'data', 'venv', 'Scripts', 'python.exe');
+    const venvPythonUnix = join(projectRoot, 'data', 'venv', 'bin', 'python');
+
     let pythonCmd = 'python'; // Default fallback
-    
-    // Check Windows venv first
+
     try {
+      // Check Windows venv first
       await readFile(venvPythonWin);
       pythonCmd = venvPythonWin;
     } catch {
-      // Check Unix venv
       try {
+        // Check Unix/Mac venv
         await readFile(venvPythonUnix);
         pythonCmd = venvPythonUnix;
       } catch {
-        // Use system Python
+        // Use system Python if no venv is found
         pythonCmd = 'python';
       }
     }
@@ -83,7 +140,7 @@ app.post('/api/admin/import-courses', async (req, res) => {
 
     // Spawn the Python process
     const pythonProcess = spawn(pythonCmd, [scriptPath], {
-      cwd: join(projectRoot, 'api_puller'),
+      cwd: join(projectRoot, 'data'),
       env: {
         ...process.env,
         // Pass SUPABASE_DB_URL from environment if available
@@ -250,7 +307,7 @@ app.post('/api/admin/import-courses', async (req, res) => {
 app.get('/api/admin/import-status', async (req, res) => {
   try {
     const projectRoot = join(__dirname, '..');
-    const outputDir = join(projectRoot, 'api_puller', 'output');
+    const outputDir = join(projectRoot, 'data', 'output');
     
     try {
       const statsFile = join(outputDir, 'statistics.json');
